@@ -10,6 +10,7 @@
     "build": "npm --prefix client run build && npm --prefix server run build && node -e \"require('node:fs').cpSync('client/dist','server/public',{recursive:true})\"",
     "start": "npm --prefix server run start",
     "check": "npm --prefix client run check && npm --prefix server run check",
+    "test": "npm --prefix server run test",
     "format": "prettier --write .",
     "install:all": "npm install && npm --prefix client install && npm --prefix server install"
   },

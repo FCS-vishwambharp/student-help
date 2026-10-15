@@ -24,6 +24,7 @@ export const queryKeys = {
   adminWithdrawals: ["admin", "withdrawals"] as const,
   referralsDashboard: ["referrals", "dashboard"] as const,
   resumeLatest: ["resume", "latest"] as const,
+  applications: ["applications"] as const,
 };
 
 // -----------------------------------------------------------------------------
@@ -201,6 +202,32 @@ export const referralsApi = {
     api.post<{ verified: boolean; upiId: string }>("/api/referrals/verify-upi", body).then(r => r.data),
   requestWithdrawal: (body: { amount: number; payoutMethod: string; upiVerificationId: string }) =>
     api.post<{ success: boolean; status: string }>("/api/referrals/request-withdrawal", body).then(r => r.data),
+};
+
+export type JobApplicationStatus = "Saved" | "Applied" | "Screening" | "Interview" | "Offer" | "Rejected" | "Withdrawn";
+
+export type JobApplication = {
+  id: string;
+  userId: string;
+  company: string;
+  role: string;
+  status: JobApplicationStatus;
+  jobUrl: string | null;
+  location: string | null;
+  notes: string;
+  interviewDate: string | null;
+  followUpDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const applicationApi = {
+  list: () => api.get<JobApplication[]>("/api/applications").then(r => r.data),
+  create: (body: Omit<JobApplication, "id" | "userId" | "createdAt" | "updatedAt">) =>
+    api.post<JobApplication>("/api/applications", body).then(r => r.data),
+  update: (id: string, body: Omit<JobApplication, "id" | "userId" | "createdAt" | "updatedAt">) =>
+    api.put<JobApplication>(`/api/applications/${id}`, body).then(r => r.data),
+  remove: (id: string) => api.delete<{ success: boolean; id: string }>(`/api/applications/${id}`).then(r => r.data),
 };
 
 // -----------------------------------------------------------------------------

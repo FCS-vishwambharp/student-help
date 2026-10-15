@@ -37,6 +37,17 @@ export async function connectDb() {
   }
 }
 
+export async function closeDb() {
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+  connected = false;
+  if (memoryServer) {
+    await memoryServer.stop();
+    memoryServer = null;
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Schemas
 // -----------------------------------------------------------------------------
@@ -69,6 +80,25 @@ const resumeSchema = new Schema(
     extractedSkills: { type: String, required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+const applicationSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    company: { type: String, required: true, trim: true },
+    role: { type: String, required: true, trim: true },
+    status: {
+      type: String,
+      enum: ["Saved", "Applied", "Screening", "Interview", "Offer", "Rejected", "Withdrawn"],
+      default: "Saved",
+    },
+    jobUrl: { type: String, default: null, trim: true },
+    location: { type: String, default: null, trim: true },
+    notes: { type: String, default: "" },
+    interviewDate: { type: Date, default: null },
+    followUpDate: { type: Date, default: null },
+  },
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 const referralRewardSchema = new Schema(
@@ -124,6 +154,7 @@ const aiConversationSchema = new Schema(
 // up in JSON responses so the API returns `id` alongside `_id`.
 userSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 resumeSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+applicationSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 referralRewardSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 upiVerificationSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 withdrawalRequestSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
@@ -135,6 +166,7 @@ aiConversationSchema.virtual("id").get(function () { return (this._id as mongoos
 
 export const UserModel = models.User ?? model("User", userSchema);
 export const ResumeModel = models.Resume ?? model("Resume", resumeSchema);
+export const ApplicationModel = models.Application ?? model("Application", applicationSchema);
 export const ReferralRewardModel = models.ReferralReward ?? model("ReferralReward", referralRewardSchema);
 export const UpiVerificationModel = models.UpiVerification ?? model("UpiVerification", upiVerificationSchema);
 export const WithdrawalRequestModel = models.WithdrawalRequest ?? model("WithdrawalRequest", withdrawalRequestSchema);
@@ -146,6 +178,7 @@ export const AiConversationModel = models.AiConversation ?? model("AiConversatio
 
 export type UserDoc = InferSchemaType<typeof userSchema> & { id: string; _id: mongoose.Types.ObjectId };
 export type ResumeDoc = InferSchemaType<typeof resumeSchema> & { id: string; _id: mongoose.Types.ObjectId };
+export type JobApplicationDoc = InferSchemaType<typeof applicationSchema> & { id: string; _id: mongoose.Types.ObjectId };
 export type ReferralRewardDoc = InferSchemaType<typeof referralRewardSchema> & { id: string };
 export type UpiVerificationDoc = InferSchemaType<typeof upiVerificationSchema> & { id: string; _id: import("mongoose").Types.ObjectId };
 export type WithdrawalRequestDoc = InferSchemaType<typeof withdrawalRequestSchema> & { id: string };

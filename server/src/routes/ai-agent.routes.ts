@@ -123,6 +123,8 @@ function buildSystemPrompt(user: UserDoc, resume: ResumeContext | null): string 
     "- Evaluate each answer briefly — what was right, what was missing, then a strong model answer — before asking the next question.",
     "- Do not reveal an answer before the student attempts the question, unless they ask for it.",
     "- Adapt difficulty when the student asks for easier or harder questions.",
+    "- If a resume review and practice session are requested together, briefly review only facts in the resume context first, then ask the first practice question in the same reply.",
+    "- If the student greets you while a practice question is still unanswered, acknowledge them briefly and invite them to answer or skip that question; do not restart with a generic capabilities list.",
     "",
     "INTERVIEW MODE — when the student asks for a mock interview:",
     "- Behave like a real interviewer: one question at a time, with follow-ups when useful.",
@@ -156,6 +158,20 @@ type Topic = {
 };
 
 const TOPICS: Topic[] = [
+  {
+    match: /\bteamwork\b|\bteam work\b|collaboration/i,
+    name: "Teamwork",
+    definition: "**Teamwork** is working with others toward a shared goal by coordinating responsibilities, communicating openly, and supporting the group's success.",
+    example: "A strong interview example explains the shared goal, your specific contribution, how you worked with others, and the outcome. Use a real experience from your own background.",
+    question: "Tell me about a time you worked with a team to achieve a shared goal. What was your role, and what was the outcome?",
+  },
+  {
+    match: /\bcommunication\b/i,
+    name: "Communication",
+    definition: "**Communication** is sharing information clearly and listening actively so that people understand one another and can work effectively.",
+    example: "A strong interview example explains who needed the information, how you adapted your message, and what changed as a result. Use a real experience from your own background.",
+    question: "Describe a time you had to communicate important information clearly to someone. How did you make sure they understood?",
+  },
   {
     match: /\bjava\b(?!\s*script)/i,
     name: "Java",
@@ -411,10 +427,83 @@ function buildFallbackReply(
   const strongest = [...skills].sort((a, b) => b.level - a.level).slice(0, 3);
   const skillList = (list: { name: string; level: number }[]) => list.map(s => `${s.name} (${s.level}%)`).join(", ");
   const uploadNudge = "I can't see a resume on your profile yet — upload your latest resume from the Profile tab and I'll personalize this. Meanwhile, ask me anything about programming concepts, code, or interview prep.";
+  const lastMessage = history.at(-1);
+  const pendingQuestion = lastMessage?.role === "assistant"
+    ? lastMessage.content.match(/\*\*Question\s+(\d+)\s*:\*\*/i)
+    : null;
+  const practiceTopic = pendingQuestion ? topicFromHistory(history) : undefined;
+
+  if (pendingQuestion && practiceTopic) {
+    if (/^(hi|hello|hey|yo|hii+)\b/i.test(lower)) {
+      return `Hi! Your ${practiceTopic.name} question is still open. Answer it when you're ready, or say **skip**.`;
+    }
+    if (/^(no|nope|nah|not really)[.! ]*$/i.test(lower)) {
+      return "That's okay. You can answer with a related example, say **skip**, or ask me to show an answer structure.";
+    }
+    if (/^skip\b/i.test(lower)) {
+      const nextQuestion = practiceTopic.name === "Teamwork"
+        ? "Tell me about a disagreement within a team. How did you help the group move forward?"
+        : "Tell me about a time a communication breakdown caused a problem. How did you address it?";
+      return [`**Question ${Number(pendingQuestion[1]) + 1}:**`, nextQuestion, "", "Answer when you're ready, or say **skip**."].join("\n");
+    }
+    if (/^answer\b/i.test(lower)) {
+      return [
+        "A strong answer uses the STAR structure: describe the **Situation**, your **Task**, the **Actions you personally took**, and the **Result**.",
+        "",
+        `Template: “During [real ${practiceTopic.name.toLowerCase()} situation], I was responsible for [your role]. I [specific actions], which led to [result].” Replace the brackets with details that are true for you.`,
+        "",
+        "Try putting that in your own words, or say **skip** for the next question.",
+      ].join("\n");
+    }
+
+    const hasAction = /\bi\s+(?:asked|clarified|coordinated|communicated|organized|listened|shared|helped|resolved|supported|delegated|proposed|adapted|followed)/i.test(message);
+    const hasOutcome = /\b(result|outcome|completed|delivered|improved|reduced|increased|achieved|success|learned)\b/i.test(message);
+    const feedback = message.trim().length < 25
+      ? "Good start, but this is too brief to evaluate. Add the situation, what you personally did, and the outcome."
+      : `You gave a relevant response${hasAction ? " and described an action you took" : ", but your own actions could be clearer"}${hasOutcome ? ", with an outcome" : ", but the result is missing"}. Use STAR to make the example specific.`;
+    const nextQuestion = practiceTopic.name === "Teamwork"
+      ? "Tell me about a disagreement within a team. How did you help the group move forward?"
+      : "Tell me about a time a communication breakdown caused a problem. How did you address it?";
+    return [
+      `**Feedback:** ${feedback}`,
+      "",
+      "**What to strengthen:** State the context, make your personal contribution distinct from the team's, and include a concrete result. Keep the example truthful to your experience.",
+      "",
+      `**Question ${Number(pendingQuestion[1]) + 1}:**`,
+      nextQuestion,
+    ].join("\n");
+  }
+
+  if (/^(no|nope|nah|not really|no thanks)[.! ]*$/i.test(lower)) {
+    return "No problem. What would you like help with instead? You can ask a question or tell me which practice topic to start.";
+  }
 
   // --- Resume-personal intents -------------------------------------------------
   const asksResume =
     /(my resume|resume|cv\b|my skills|skills? (do i have|in my|listed|detected)|my .{1,15} skill|skill level|my profile|based on my|what should i (improve|learn|focus)|what.?s my|how strong)/i.test(lower);
+  const asksPractice = /(interview|mock|prepare|practice|quiz|question|ask me|test me|drill|session)/i.test(lower);
+  if (asksResume && asksPractice) {
+    if (!resume) return `${uploadNudge}\n\nOnce your resume is available, I can review it briefly and then start the practice question.`;
+    const topic = findTopic(lower);
+    const subject = topic?.name ?? "interview";
+    const resumeReview = [
+      `**Quick resume review (${resume.fileName}):**`,
+      resume.summary ? resume.summary : "No resume summary was detected.",
+      skills.length ? `**Skills detected:** ${skillList(strongest)}.` : "**Skills:** none detected yet.",
+      resume.projects.length ? `**Projects:** ${resume.projects.map(p => p.title).join(", ")}.` : "",
+      resume.experience.length ? `**Experience:** ${resume.experience.map(item => [item.role, item.company].filter(Boolean).join(" at ")).join("; ")}.` : "",
+    ].filter(Boolean);
+    return [
+      ...resumeReview,
+      "",
+      `Let's start your **${subject}** practice session.`,
+      "",
+      "**Question 1:**",
+      topic?.question ?? `Tell me about a time you demonstrated ${subject.toLowerCase()}. What was the situation, your role, and the outcome?`,
+      "",
+      "Answer in your own words. I'll give feedback and then ask the next question.",
+    ].join("\n");
+  }
   if (asksResume) {
     if (!resume) return uploadNudge;
 
@@ -424,7 +513,7 @@ function buildFallbackReply(
           ? `Based on your resume, your fastest improvement targets are: ${skillList(weakest)}.`
           : "Your resume doesn't have enough skill detail yet for me to rank improvement targets.",
         "",
-        strongest.length ? `You already signal strength in ${skillList(strongest)} — keep those sharp for interviews.` : "",
+        strongest.length ? `You already show strength in ${skillList(strongest)} — keep those sharp for interviews.` : "",
         "Focus this week on your single weakest skill: one small project or drill that produces visible evidence beats passive course-watching.",
         "",
         "Ask me to \"prepare me for an interview\" when you're ready to rehearse.",
@@ -436,7 +525,7 @@ function buildFallbackReply(
       const wanted = levelMatch[1].toLowerCase();
       const found = skills.find(s => s.name.toLowerCase() === wanted || s.name.toLowerCase().includes(wanted));
       return found
-        ? `Your resume lists **${found.name}** at **${found.level}%** signal. ${found.level < 60 ? "That's a lower-confidence skill — worth some focused practice." : "That's one of your stronger signals — be ready to talk through real examples."}`
+        ? `Your resume lists **${found.name}** at **${found.level}%** proficiency. ${found.level < 60 ? "That's a lower-confidence skill — worth some focused practice." : "That's one of your stronger skills — be ready to talk through real examples."}`
         : `Your resume doesn't list a skill matching "${wanted}". It shows: ${skillList(skills.slice(0, 10)) || "no skills detected yet"}.`;
     }
 
@@ -490,7 +579,7 @@ function buildFallbackReply(
     return [
       `Here's an interview plan based on your resume, ${name}:`,
       "",
-      `**Strongest signals:** ${strongest.length ? skillList(strongest) : "not enough skill data yet"} — be ready to defend these with real examples.`,
+      `**Strongest skills:** ${strongest.length ? skillList(strongest) : "not enough skill data yet"} — be ready to defend these with real examples.`,
       `**Likely probing areas:** ${weakest.length ? skillList(weakest) : "—"} — interviewers often test the skills listed at lower confidence.`,
       resume.projects.length ? `**Projects to rehearse:** ${resume.projects.map(p => p.title).join(", ")} — prepare a 60-second story (problem → approach → result) for each.` : "",
       "",
@@ -578,7 +667,7 @@ function buildFallbackReply(
   }
 
   // --- Honest offline default -----------------------------------------------------------
-  return "I'm running in offline mode right now, so I answer common programming, career, and resume questions. Try:\n- \"What is React?\" or \"explain SQL joins\"\n- \"Write a Java hello world\"\n- \"Start a Java practice session\"\n- \"Analyze my resume\"\n\nFor deeper, fully open-ended answers, the workspace needs an AI provider key configured on the server.";
+  return "I can't answer that fully because live AI is not configured. Add your provider key to `server/.env` as `OPENAI_API_KEY=...`, then restart the server. I can still help with common topics and run basic Teamwork or Communication practice offline.";
 }
 
 // -----------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import resumeRoutes from "./routes/resume.routes";
 import supportRoutes from "./routes/support.routes";
 import aiAgentRoutes from "./routes/ai-agent.routes";
 import referralsRoutes from "./routes/referrals.routes";
+import applicationsRoutes from "./routes/applications.routes";
 import adminRoutes from "./routes/admin.routes";
 import systemRoutes from "./routes/system.routes";
 
@@ -46,6 +47,7 @@ async function startServer() {
   app.use("/api/support", supportRoutes);
   app.use("/api/ai-agent", aiAgentRoutes);
   app.use("/api/referrals", referralsRoutes);
+  app.use("/api/applications", applicationsRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/system", systemRoutes);
 
